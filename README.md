@@ -1,7 +1,5 @@
 # Simple Chatbot
 
-<img src="image.png" width="420px">
-
 This repository demonstrates a simple AI chatbot with real-time audio/video interaction, implemented using different client and server options. The bot server supports multiple AI backends, and you can connect to it using five different client approaches.
 
 ## Two Bot Options
@@ -15,32 +13,6 @@ This repository demonstrates a simple AI chatbot with real-time audio/video inte
    - Uses Google's Gemini Multimodal Live model
    - Requires Gemini API key
 
-## Five Client Options
-
-1. **Daily Prebuilt** (Simplest)
-
-   - Direct connection through a Daily Prebuilt room
-   - For demo purposes only; handy for quick testing
-
-2. **JavaScript**
-
-   - Basic implementation using [Pipecat JavaScript SDK](https://docs.pipecat.ai/client/js/introduction)
-   - No framework dependencies
-   - Good for learning the fundamentals
-
-3. **React**
-
-   - Basic impelmentation using [Pipecat React SDK](https://docs.pipecat.ai/client/react/introduction)
-   - Demonstrates the basic client principles with Pipecat React
-
-4. **Android**
-
-   - Basic implementation using [Pipecat Android SDK](https://docs.pipecat.ai/client/android/introduction)
-   - Demonstrates the basic client principles with Pipecat Android
-
-5. **iOS**
-   - Basic implementation using [Pipecat iOS SDK](https://docs.pipecat.ai/client/ios/introduction)
-   - Demonstrates the basic client principles with Pipecat iOS
 
 ## Quick Start
 
@@ -70,12 +42,8 @@ This repository demonstrates a simple AI chatbot with real-time audio/video inte
    python server.py
    ```
 
-### Next, connect using your preferred client app:
+### Next, connect using the client app:
 
-- [Android Guide](client/android/README.md)
-- [iOS Guide](client/ios/README.md)
-- [Daily Prebuilt](client/prebuilt/README.md)
-- [JavaScript Guide](client/javascript/README.md)
 - [React Guide](client/react/README.md)
 
 ## Important Note
@@ -102,10 +70,5 @@ simple-chatbot/
 │   ├── runner.py        # Server runner utilities
 │   ├── server.py        # FastAPI server
 │   └── requirements.txt
-└── client/              # Client implementations
-    ├── android/         # Daily Android connection
-    ├── ios/             # Daily iOS connection
-    ├── javascript/      # Daily JavaScript connection
-    ├── prebuilt/        # Pipecat Prebuilt client
-    └── react/           # Pipecat React client
+└── client/              # Pipecat React client
 ```

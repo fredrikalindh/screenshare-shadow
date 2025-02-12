@@ -15,6 +15,8 @@ class InterruptChecker(PipelineStage):
     async def run(self, frames: List[PipelineFrame]) -> List[PipelineFrame]:
         new_frames = []
 
+        print(f"InterruptChecker: {frames}")
+        
         for frame in frames:
             # We only care about frames that contain new user text
             # (e.g. 'transcription' events, or if you're storing them differently

@@ -29,11 +29,7 @@ from runner import configure
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     Frame,
-    OutputImageRawFrame,
-    SpriteFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -43,37 +39,17 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
+# from interrupt import InterruptChecker
+from wake_filter import WakeCheckFilter
+from function_filter import FunctionFilter
 load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-sprites = []
-script_dir = os.path.dirname(__file__)
 
-for i in range(1, 26):
-    # Build the full path to the image file
-    full_path = os.path.join(script_dir, f"assets/robot0{i}.png")
-    # Get the filename without the extension to use as the dictionary key
-    # Open the image and convert it to bytes
-    with Image.open(full_path) as img:
-        sprites.append(OutputImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
-
-# Create a smooth animation by adding reversed frames
-flipped = sprites[::-1]
-sprites.extend(flipped)
-
-# Define static and animated states
-quiet_frame = sprites[0]  # Static frame for when bot is listening
-talking_frame = SpriteFrame(images=sprites)  # Animation sequence for when bot is talking
-
-
-class TalkingAnimation(FrameProcessor):
-    """Manages the bot's visual animation states.
-
-    Switches between static (listening) and animated (talking) states based on
-    the bot's current speaking status.
+class InterruptChecker(FrameProcessor):
+    """
     """
 
     def __init__(self):
@@ -81,26 +57,14 @@ class TalkingAnimation(FrameProcessor):
         self._is_talking = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process incoming frames and update animation state.
-
-        Args:
-            frame: The incoming frame to process
-            direction: The direction of frame flow in the pipeline
+        """
         """
         await super().process_frame(frame, direction)
-
-        # Switch to talking animation when bot starts speaking
-        if isinstance(frame, BotStartedSpeakingFrame):
-            if not self._is_talking:
-                await self.push_frame(talking_frame)
-                self._is_talking = True
-        # Return to static frame when bot stops speaking
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.push_frame(quiet_frame)
-            self._is_talking = False
+        
+        if (frame.key == "transcription" and frame.payload):
+            print(f"InterruptChecker: {frame}")
 
         await self.push_frame(frame, direction)
-
 
 async def main():
     """Main bot execution function.
@@ -137,14 +101,7 @@ async def main():
             voice_id="Aoede",  # Puck, Aoede, Charon, Fenrir, Kore, Puck
             transcribe_user_audio=True,
             transcribe_model_audio=True,
-            # system_instruction=''
-        )
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-"""You are a helpful assistant that shadows the user's actions and explains them in detail. Your primary goal is to understand the user's task by watching their screen and listening carefully as they describe their process. When the user's explanation or on-screen activity is unclear or when additional details would be helpful, you ask concise, clarifying questions. 
+            system_instruction="""You are a helpful assistant that shadows the user's actions and explains them in detail. Your primary goal is to understand the user's task by watching their screen and listening carefully as they describe their process. When the user's explanation or on-screen activity is unclear or when additional details would be helpful, you ask concise, clarifying questions. 
 
 Keep in mind:
 - The user will demonstrate a task they need help with by both explaining it verbally and sharing their screen.
@@ -172,14 +129,16 @@ For example, consider the following interactions:
    - **You (Assistant):** "I don’t see the LinkedIn page on your screen yet—could you please bring it up so I can follow along?"
 
 Remember to be brief, clear, and friendly in your questions. Your interjections should always help the user clarify their process without disrupting their flow.
-"""),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Start by saying the following: 'I'm here to help you with your task. I'll watch your screen and listen to your explanation. If I don't understand something, I'll ask you to clarify. Could you start by telling me about the task?."
-                ),
-            },
+"""
+        )
+
+        messages = [
+            # {
+            #     "role": "user",
+            #     "content": (
+            #         "Start by saying the following: 'I'm here to help you with your task. I'll watch your screen and listen to your explanation. If I don't understand something, I'll ask you to clarify. Could you start by telling me about the task?."
+            #     ),
+            # },
         ]
 
         # Set up conversation context and management
@@ -187,22 +146,25 @@ Remember to be brief, clear, and friendly in your questions. Your interjections 
         context = OpenAILLMContext(messages)
         context_aggregator = llm.create_context_aggregator(context)
 
-        ta = TalkingAnimation()
-
         #
         # RTVI events for Pipecat client UI
         #
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
+        # Insert our custom stage
+        # interrupt_checker = InterruptChecker()
+
+        wake_filter = WakeCheckFilter(wake_phrases=["daily", "daily.co"])
+        function_filter = FunctionFilter(filter=lambda frame: True)
         pipeline = Pipeline(
             [
-                transport.input(),
-                rtvi,
-                context_aggregator.user(),
-                llm,
-                ta,
-                transport.output(),
-                context_aggregator.assistant(),
+                transport.input(),            # 1) user frames in
+                rtvi,                         # 2) UI event handling
+                context_aggregator.user(),    # 3) collects user messages
+                wake_filter,                  # 4) decides whether to talk or not
+                llm,                          # 5) only runs if there's an assistant msg
+                transport.output(),           # 7) produce final audio output
+                context_aggregator.assistant()# 8) store assistant messages
             ]
         )
 
@@ -215,7 +177,6 @@ Remember to be brief, clear, and friendly in your questions. Your interjections 
                 observers=[RTVIObserver(rtvi)],
             ),
         )
-        await task.queue_frame(quiet_frame)
 
         @rtvi.event_handler("on_client_ready")
         async def on_client_ready(rtvi):

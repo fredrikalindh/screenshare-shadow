@@ -39,32 +39,13 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-# from interrupt import InterruptChecker
-from wake_filter import WakeCheckFilter
-from function_filter import FunctionFilter
+from service import LoggingService
+
 load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
-
-class InterruptChecker(FrameProcessor):
-    """
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._is_talking = False
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """
-        """
-        await super().process_frame(frame, direction)
-        
-        if (frame.key == "transcription" and frame.payload):
-            print(f"InterruptChecker: {frame}")
-
-        await self.push_frame(frame, direction)
 
 async def main():
     """Main bot execution function.
@@ -129,16 +110,21 @@ For example, consider the following interactions:
    - **You (Assistant):** "I don’t see the LinkedIn page on your screen yet—could you please bring it up so I can follow along?"
 
 Remember to be brief, clear, and friendly in your questions. Your interjections should always help the user clarify their process without disrupting their flow.
+
+If you don't have any question, just fill words like "Yes", "I see", or "Ok".
+
+Begin the conversation by saying "Hi, I'm here to help you with your task. I'll watch your screen and listen to your explanation. If I don't understand something, I'll ask you to clarify. Could you start by telling me about the task?."
 """
         )
 
         messages = [
-            # {
-            #     "role": "user",
-            #     "content": (
-            #         "Start by saying the following: 'I'm here to help you with your task. I'll watch your screen and listen to your explanation. If I don't understand something, I'll ask you to clarify. Could you start by telling me about the task?."
-            #     ),
-            # },
+            {
+                "role": "user",
+                "content": (
+                    # "Start by saying the following: 'I'm here to help you with your task. I'll watch your screen and listen to your explanation. If I don't understand something, I'll ask you to clarify. Could you start by telling me about the task?."
+                    "Hi"
+                ),
+            },
         ]
 
         # Set up conversation context and management
@@ -153,15 +139,14 @@ Remember to be brief, clear, and friendly in your questions. Your interjections 
 
         # Insert our custom stage
         # interrupt_checker = InterruptChecker()
+        # logging_service = LoggingService()
 
-        wake_filter = WakeCheckFilter(wake_phrases=["daily", "daily.co"])
-        function_filter = FunctionFilter(filter=lambda frame: True)
         pipeline = Pipeline(
             [
                 transport.input(),            # 1) user frames in
                 rtvi,                         # 2) UI event handling
                 context_aggregator.user(),    # 3) collects user messages
-                wake_filter,                  # 4) decides whether to talk or not
+                # logging_service,
                 llm,                          # 5) only runs if there's an assistant msg
                 transport.output(),           # 7) produce final audio output
                 context_aggregator.assistant()# 8) store assistant messages

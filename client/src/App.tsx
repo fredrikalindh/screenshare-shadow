@@ -22,13 +22,18 @@ function ScreenShareVideo() {
 
   useEffect(() => {
     setIsSharing(screen_sharing);
+    console.log("screen_sharing", screen_sharing);
+    
   }, [screen_sharing]);
 
   if (!isConnected) return null;
 
   if (!isSharing) {
     return ( <div className="controls">
-      <button onClick={() => rtviClient?.enableScreenShare(true)}   className='connect-btn'>
+      <button onClick={() => {rtviClient?.enableScreenShare(true)
+
+setIsSharing(true)
+      }}   className='connect-btn'>
         Share Screen
       </button></div>
     );
@@ -40,7 +45,10 @@ function ScreenShareVideo() {
         <RTVIClientVideo trackType='screenVideo' participant="local" fit="cover" />
       </div>
       <div className="controls">
-        <button onClick={() => rtviClient?.enableScreenShare(false)}   className='disconnect-btn'>Stop Sharing</button>
+        <button onClick={() => {rtviClient?.enableScreenShare(false);
+
+          setIsSharing(false)
+        }}   className='disconnect-btn'>Stop Sharing</button>
       </div>
     </div>
   );

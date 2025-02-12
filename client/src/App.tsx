@@ -27,10 +27,10 @@ function ScreenShareVideo() {
   if (!isConnected) return null;
 
   if (!isSharing) {
-    return (
-      <button onClick={() => rtviClient?.enableScreenShare(true)}>
+    return ( <div className="controls">
+      <button onClick={() => rtviClient?.enableScreenShare(true)}   className='connect-btn'>
         Share Screen
-      </button>
+      </button></div>
     );
   }
 
@@ -39,7 +39,9 @@ function ScreenShareVideo() {
       <div className="video-container">
         <RTVIClientVideo trackType='screenVideo' participant="local" fit="cover" />
       </div>
-      <button onClick={() => rtviClient?.enableScreenShare(false)}>Stop Sharing</button>
+      <div className="controls">
+        <button onClick={() => rtviClient?.enableScreenShare(false)}   className='disconnect-btn'>Stop Sharing</button>
+      </div>
     </div>
   );
 }

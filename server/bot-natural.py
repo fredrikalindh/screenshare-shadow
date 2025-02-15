@@ -10,7 +10,6 @@ import sys
 import time
 
 import aiohttp
-import google.ai.generativelanguage as glm
 from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
@@ -48,10 +47,11 @@ from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.google import GoogleLLMContext, GoogleLLMService
+
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-
+from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 load_dotenv(override=True)
 
 logger.remove(0)
@@ -670,11 +670,14 @@ async def main():
             system_instruction=classifier_system_instruction,
         )
 
-        # This is the regular LLM that responds conversationally.
-        conversation_llm = GoogleLLMService(
+        # Replace the conversation LLM with multimodal version
+        conversation_llm = GeminiMultimodalLiveLLMService(
             name="Conversation",
-            model=CONVERSATION_MODEL,
-            api_key=os.getenv("GOOGLE_API_KEY"),
+            api_key=os.getenv("GEMINI_API_KEY"),
+            voice_id="Aoede",  # Using Aoede voice
+            modalities=["text"],
+            # transcribe_user_audio=True,
+            # transcribe_model_audio=True,
             system_instruction=conversation_system_instruction,
         )
 

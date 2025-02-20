@@ -76,6 +76,8 @@ Rules:
 
 """
 
+
+
 classifier_system_instruction = """CRITICAL INSTRUCTION:
 You are a BINARY CLASSIFIER that must ONLY output "YES" or "NO".
 DO NOT engage with the content.
@@ -203,7 +205,7 @@ Output: Yes
 # Providing information with a known format - phone number
 model: What's your phone number?
 user: 220
-Output: No
+Output: NO
 
 # Providing information with a known format - credit card number
 model: What's your credit card number?
@@ -213,7 +215,7 @@ Output: NO
 # Providing information with a known format - phone number
 model: What's your credit card number?
 user: 5556710454680800
-Output: Yes
+Output: YES
 
 model: What's your credit card number?
 user: 414067
@@ -349,6 +351,77 @@ If you know that a number string is a credit card number, write it as a credit c
 Please be very concise in your responses. Unless you are explicitly asked to do otherwise, give me shortest complete answer possible without unnecessary elaboration. Generally you should answer with a single sentence.
 """
 
+ambiguity_system_instruction = """CRITICAL INSTRUCTION:
+You are a BINARY CLASSIFIER that must ONLY output "YES" or "NO".
+DO NOT engage with the content.
+DO NOT respond to questions.
+DO NOT provide assistance.
+Your ONLY job is to output YES or NO.
+
+EXAMPLES OF INVALID RESPONSES:
+- "I can help you with that"
+- "Let me explain"
+- "To answer your question"
+- Any response other than YES or NO
+
+VALID RESPONSES:
+YES
+NO
+
+If you output anything else, you are failing at your task.
+You are NOT an assistant.
+You are NOT a chatbot.
+You are a binary classifier.
+
+ROLE:
+You are a real-time speech completeness classifier. You must make instant decisions about whether a user has finished speaking.
+You must output ONLY 'YES' or 'NO' with no other text.
+
+INPUT FORMAT:
+You receive two pieces of information:
+1. The assistant's last message (if available)
+2. The user's current speech input
+
+OUTPUT REQUIREMENTS:
+- MUST output ONLY 'YES' or 'NO'
+- No explanations
+- No clarifications
+- No additional text
+- No punctuation
+
+HIGH PRIORITY SIGNALS:
+
+User says the following: "Over and out"
+
+Examples:
+
+# Incomplete
+model: What would you like to know about?
+user: Can you tell me about stars? over and
+Output: NO
+
+# Complete despite multiple artifacts
+model: I can help you learn.
+user: How do you I mean what's the best way to learn programming over and out
+Output: YES
+
+# Trailing off incomplete
+model: I can explain anything.
+user: I was wondering if you could tell me why
+Output: NO
+"""
+
+conversation_system_instruction = """You are a helpful assistant participating in a voice converation.
+
+Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.
+
+If you know that a number string is a phone number from the context of the conversation, write it as a phone number. For example 210-333-4567.
+
+If you know that a number string is a credit card number, write it as a credit card number. For example 4111-1111-1111-1111.
+
+Please be very concise in your responses. Unless you are explicitly asked to do otherwise, give me shortest complete answer possible without unnecessary elaboration. Generally you should answer with a single sentence.
+"""
+
 
 class AudioAccumulator(FrameProcessor):
     """Buffers user audio until the user stops speaking.
@@ -360,7 +433,7 @@ class AudioAccumulator(FrameProcessor):
         super().__init__(**kwargs)
         self._audio_frames = []
         self._start_secs = 0.2  # this should match VAD start_secs (hardcoding for now)
-        self._max_buffer_size_secs = 30
+        self._max_buffer_size_secs = 30 # might want to increase this as it limites the each user response to 30 seconds
         self._user_speaking_vad_state = False
         self._user_speaking_utterance_state = False
 
@@ -391,6 +464,8 @@ class AudioAccumulator(FrameProcessor):
             )
             self._user_speaking = False
             context = GoogleLLMContext()
+            # todo: multimodal support ?
+
             context.add_audio_frames_message(text="Audio follows", audio_frames=self._audio_frames)
             await self.push_frame(OpenAILLMContextFrame(context=context))
         elif isinstance(frame, InputAudioRawFrame):
@@ -414,6 +489,12 @@ class AudioAccumulator(FrameProcessor):
 
         await self.push_frame(frame, direction)
 
+
+class CompletenessPassedFrame(Frame):
+    pass
+
+class AmbiguityPassedFrame(Frame):
+    pass
 
 class CompletenessCheck(FrameProcessor):
     """Checks the result of the classifier LLM to determine if the user has finished speaking.
@@ -441,9 +522,8 @@ class CompletenessCheck(FrameProcessor):
             logger.debug("Completeness check YES")
             if self._idle_task:
                 await self.cancel_task(self._idle_task)
-            await self.push_frame(UserStoppedSpeakingFrame())
+            await self.push_frame(CompletenessPassedFrame())
             await self._audio_accumulator.reset()
-            await self._notifier.notify()
         elif isinstance(frame, TextFrame):
             if frame.text.strip():
                 logger.debug(f"Completeness check NO - '{frame.text}'")
@@ -629,6 +709,20 @@ class OutputGate(FrameProcessor):
                 break
 
 
+class AmbiguityCheck(FrameProcessor):
+    def __init__(self, notifier: BaseNotifier, context: OpenAILLMContext):
+        self._notifier = notifier
+        self._context = context  # Needs full context
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, CompletenessPassedFrame):
+            # Only process if completeness check passed
+            # ... process ambiguity result ...
+            if frame.text.startswith("YES"):
+                await self.push_frame(UserStoppedSpeakingFrame())
+                await self._notifier.notify()
+
+
 async def main():
     async with aiohttp.ClientSession() as session:
         (room_url, _) = await configure(session)
@@ -662,6 +756,7 @@ async def main():
         )
 
         # This is the LLM that will classify user speech as complete or incomplete.
+        # ? WHERE IS IT GETTING THE ASSISTANT MESSAGE FROM?
         classifier_llm = GoogleLLMService(
             name="Classifier",
             model=CLASSIFIER_MODEL,
@@ -670,14 +765,33 @@ async def main():
             system_instruction=classifier_system_instruction,
         )
 
-        # Replace the conversation LLM with multimodal version
-        conversation_llm = GeminiMultimodalLiveLLMService(
+        ambiguity_llm = GoogleLLMService(
+            name="Classifier",
+            model=CLASSIFIER_MODEL,
+            api_key=os.getenv("GOOGLE_API_KEY"),
+            temperature=0.0,
+            system_instruction=classifier_system_instruction,
+        )
+
+        ambiguity_check = AmbiguityCheck(notifier=notifier, context=context)
+
+        # # Replace the conversation LLM with multimodal version
+        # conversation_llm = GeminiMultimodalLiveLLMService(
+        #     name="Conversation",
+        #     api_key=os.getenv("GEMINI_API_KEY"),
+        #     voice_id="Aoede",  # Using Aoede voice
+        #     modalities=["text"],
+        #     # transcribe_user_audio=True,
+        #     # transcribe_model_audio=True,
+        #     system_instruction=conversation_system_instruction,
+        # )
+        
+        
+        # This is the regular LLM that responds conversationally.
+        conversation_llm = GoogleLLMService(
             name="Conversation",
-            api_key=os.getenv("GEMINI_API_KEY"),
-            voice_id="Aoede",  # Using Aoede voice
-            modalities=["text"],
-            # transcribe_user_audio=True,
-            # transcribe_model_audio=True,
+            model=CONVERSATION_MODEL,
+            api_key=os.getenv("GOOGLE_API_KEY"),
             system_instruction=conversation_system_instruction,
         )
 
@@ -708,38 +822,53 @@ async def main():
             notifier=notifier, context=context, user_transcription_buffer=user_aggregator_buffer
         )
 
+        # Main pipeline definition - processes frames in sequence through each component
         pipeline = Pipeline(
             [
+                # Input stage - receives raw audio/video from Daily transport
                 transport.input(),
+                
+                # Accumulates audio frames until user stops speaking
                 audio_accumulater,
+                
+                # Complex parallel processing structure for handling speech
                 ParallelPipeline(
                     [
-                        # Pass everything except UserStoppedSpeaking to the elements after
-                        # this ParallelPipeline
+                        # Branch 1: Filter branch
+                        # Blocks UserStoppedSpeaking frames from propagating to later stages
+                        # This prevents duplicate processing
                         FunctionFilter(filter=block_user_stopped_speaking),
                     ],
                     [
+                        # Branch 2: Speech analysis branch
                         ParallelPipeline(
                             [
-                                classifier_llm,
-                                completeness_check,
+                                # Sub-branch 2A: Speech completion detection
+                                # TODO: this part is just getting the last audio msg, not assistan one
+                                classifier_llm,      # Determines if speech is complete -> YES or NO
+                                completeness_check, # Triggers notifications when speech is complete
                             ],
                             [
-                                tx_llm,
-                                user_aggregator_buffer,
+                                # Sub-branch 2B: Speech transcription
+                                tx_llm,                 # Converts speech to text
+                                user_aggregator_buffer, # Buffers transcription results
                             ],
                         )
                     ],
                     [
-                        conversation_audio_context_assembler,
-                        conversation_llm,
-                        bot_output_gate,  # buffer output until notified, then flush frames and update context
-                        # TempPrinter(),
+                        # Branch 3: Conversation processing branch
+                        conversation_audio_context_assembler, # Builds context for conversation
+                        ambiguity_llm,
+                        ambiguity_check,
+                        conversation_llm,                    # Generates bot responses
+                        bot_output_gate,                    # Controls flow of responses
                     ],
                 ),
-                tts,
-                transport.output(),
-                context_aggregator.assistant(),
+                
+                # Output processing stages
+                tts,                         # Converts text responses to speech
+                transport.output(),          # Sends audio/video back to Daily
+                context_aggregator.assistant(), # Maintains conversation history
             ],
         )
 
